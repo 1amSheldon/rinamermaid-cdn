@@ -8,6 +8,11 @@
 (function exposeRinaWaterEffect(global) {
   "use strict";
 
+  if (global.RinaWaterEffect?.mount) {
+    global.dispatchEvent(new CustomEvent("rina-water-effect-ready"));
+    return;
+  }
+
   const TRAIL_COUNT = 20;
   const TRAIL_LIFETIME = 760;
   const mounts = new WeakMap();
@@ -805,4 +810,5 @@
   }
 
   global.RinaWaterEffect = Object.freeze({ mount });
+  global.dispatchEvent(new CustomEvent("rina-water-effect-ready"));
 }(window));

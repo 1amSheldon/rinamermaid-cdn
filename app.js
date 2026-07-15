@@ -3,10 +3,14 @@
 // Created by RxGroup on 15.07.2026.
 // Copyright © 2026 RX Group. All rights reserved.
 
-document.documentElement.classList.replace("no-js", "js");
+(() => {
+const APP_BOOT_KEY = "__RINA_MERMAID_APP_BOOTED__";
+if (window[APP_BOOT_KEY]) return;
+window[APP_BOOT_KEY] = true;
 
 const coarsePointer = window.matchMedia("(pointer: coarse)");
 const mobileViewport = window.matchMedia("(max-width: 48rem)");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const story = document.querySelector("[data-story]");
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 
@@ -25,7 +29,7 @@ function loadVideo(video, { autoplay = false, useMirror = false } = {}) {
 }
 
 function setupStory() {
-  if (!story) return;
+  if (!story) return false;
 
   const stage = story.querySelector("[data-stage]");
   const surface = story.querySelector("[data-surface-video]");
@@ -35,15 +39,16 @@ function setupStory() {
   const bookingScene = story.querySelector("[data-booking]");
   const bookingPanel = bookingScene?.querySelector(".story-scene__inner");
   const backToTop = document.querySelector("[data-back-to-top]");
-  const useWaterEffect = !coarsePointer.matches;
+  const useWaterEffect = !coarsePointer.matches && !reducedMotion.matches;
 
   let animationFrame = 0;
   let experienceVisible = true;
-  let motionEnabled = true;
+  let motionEnabled = !reducedMotion.matches;
   let filmReady = false;
   let filmVisibleReady = false;
   let filmRequested = false;
   let filmSeekTimer = 0;
+  let filmSeekEscalationTimer = 0;
   let filmLoadTimer = 0;
   let surfaceLoadTimer = 0;
   let surfaceStartTime = null;
@@ -56,17 +61,28 @@ function setupStory() {
   let storyTopY = 0;
   let storyRange = 1;
   let bookingTravel = 0;
+  const resyncTimers = new Set();
 
   surface?.setAttribute("aria-hidden", "true");
   film?.setAttribute("aria-hidden", "true");
 
-  const waterController = useWaterEffect
-    && window.RinaWaterEffect?.mount
-    && stage
-    && surface
-    && canvas
-    ? window.RinaWaterEffect.mount({ container: stage, video: surface, canvas })
-    : null;
+  let waterController = null;
+
+  function mountWaterEffect() {
+    if (
+      waterController
+      || !useWaterEffect
+      || !window.RinaWaterEffect?.mount
+      || !stage
+      || !surface
+      || !canvas
+    ) return;
+    waterController = window.RinaWaterEffect.mount({ container: stage, video: surface, canvas });
+    waterController?.setActive(motionEnabled);
+  }
+
+  mountWaterEffect();
+  window.addEventListener("rina-water-effect-ready", mountWaterEffect, { once: true });
 
   const smoothstep = (value) => value * value * (3 - 2 * value);
 
@@ -77,6 +93,7 @@ function setupStory() {
 
   function showFilmFrame() {
     window.clearTimeout(filmSeekTimer);
+    window.clearTimeout(filmSeekEscalationTimer);
     if (!filmVisibleReady) {
       filmVisibleReady = true;
       story.style.setProperty("--film-ready", "1");
@@ -85,11 +102,23 @@ function setupStory() {
 
   function armFilmFallback() {
     window.clearTimeout(filmSeekTimer);
+    window.clearTimeout(filmSeekEscalationTimer);
     filmSeekTimer = window.setTimeout(() => {
       if (!film || Math.abs(film.currentTime - pendingFilmTime) > 0.08) {
         showFilmFallback();
       }
     }, 1200);
+    filmSeekEscalationTimer = window.setTimeout(() => {
+      if (
+        !film
+        || film.dataset.videoSource !== "origin"
+        || Math.abs(film.currentTime - pendingFilmTime) <= 0.08
+      ) return;
+      if (switchToMirror(film)) {
+        filmReady = false;
+        showFilmFallback();
+      }
+    }, 2800);
   }
 
   function switchToMirror(video, { autoplay = false } = {}) {
@@ -124,7 +153,7 @@ function setupStory() {
     }
     if (filmRequested && film.currentSrc) return;
     filmRequested = true;
-    film.preload = "metadata";
+    film.preload = "auto";
     if (loadVideo(film)) armFilmMirror();
     filmReady = film.readyState >= 2;
   }
@@ -174,8 +203,8 @@ function setupStory() {
         current = candidate;
         next = following;
         local = clamp((currentY - candidate.anchor) / Math.max(1, following.anchor - candidate.anchor));
-        fadeOut = smoothstep(clamp((local - 0.32) / 0.16));
-        fadeIn = smoothstep(clamp((local - 0.52) / 0.16));
+        fadeOut = smoothstep(clamp((local - 0.38) / 0.12));
+        fadeIn = smoothstep(clamp((local - 0.46) / 0.12));
         break;
       }
     }
@@ -206,10 +235,6 @@ function setupStory() {
     }
 
     const activeItem = next && local >= 0.5 ? next : current;
-    if (activeItem.scene === bookingScene) {
-      bookingScene.style.setProperty("--scene-opacity", "1");
-      bookingScene.style.setProperty("--scene-shift", "0rem");
-    }
     scenes.forEach((scene) => {
       const active = scene === activeItem.scene;
       scene.classList.toggle("is-active", active);
@@ -303,6 +328,7 @@ function setupStory() {
     seekFilm(filmTime);
     waterController?.setActive(motionEnabled && currentY < crossfadeEndY);
     syncSurface(currentY);
+    document.documentElement.classList.add("story-ready");
   }
 
   function requestRender() {
@@ -314,13 +340,36 @@ function setupStory() {
     requestRender();
   }
 
+  function scheduleRemeasure() {
+    resyncTimers.forEach((timer) => window.clearTimeout(timer));
+    resyncTimers.clear();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(remeasure);
+    });
+    [120, 700].forEach((delay) => {
+      const timer = window.setTimeout(() => {
+        resyncTimers.delete(timer);
+        remeasure();
+      }, delay);
+      resyncTimers.add(timer);
+    });
+  }
+
+  function warmFilm() {
+    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || "")) return;
+    ensureFilmLoaded();
+  }
+
   film?.addEventListener("loadeddata", () => {
     window.clearTimeout(filmLoadTimer);
+    window.clearTimeout(filmSeekEscalationTimer);
     filmReady = true;
     requestRender();
   }, { passive: true });
   film?.addEventListener("loadedmetadata", requestRender, { passive: true });
   film?.addEventListener("canplay", () => {
+    window.clearTimeout(filmSeekEscalationTimer);
     filmReady = true;
     requestRender();
   }, { passive: true });
@@ -334,11 +383,17 @@ function setupStory() {
     filmReady = false;
     filmRequested = true;
     window.clearTimeout(filmSeekTimer);
+    window.clearTimeout(filmSeekEscalationTimer);
     showFilmFallback();
   }, { passive: true });
   surface?.addEventListener("loadeddata", () => {
     window.clearTimeout(surfaceLoadTimer);
     requestRender();
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(warmFilm, { timeout: 2500 });
+    } else {
+      window.setTimeout(warmFilm, 900);
+    }
   }, { passive: true });
   surface?.addEventListener("loadedmetadata", requestRender, { passive: true });
   surface?.addEventListener("error", () => {
@@ -367,10 +422,15 @@ function setupStory() {
   window.addEventListener("keydown", ensureFilmLoaded, { once: true });
   window.addEventListener("scroll", requestRender, { passive: true });
   window.addEventListener("resize", remeasure, { passive: true });
-  window.addEventListener("load", remeasure, { once: true });
-  document.fonts?.ready.then(remeasure).catch(() => {});
+  window.addEventListener("load", scheduleRemeasure, { once: true });
+  window.addEventListener("pageshow", scheduleRemeasure, { passive: true });
+  window.addEventListener("hashchange", scheduleRemeasure, { passive: true });
+  window.addEventListener("popstate", scheduleRemeasure, { passive: true });
+  document.fonts?.ready.then(scheduleRemeasure).catch(() => {});
   measure();
   render();
+  scheduleRemeasure();
+  return true;
 }
 
 function setupCourseSelection() {
@@ -660,11 +720,31 @@ function setupForm() {
   });
 }
 
-document.querySelectorAll("[data-year]").forEach((element) => {
-  element.textContent = String(new Date().getFullYear());
-});
+function boot() {
+  const root = document.documentElement;
+  root.classList.replace("no-js", "js");
 
-setupStory();
-setupCourseSelection();
-setupPhoneMask();
-setupForm();
+  try {
+    if (!setupStory()) throw new Error("Story root is missing");
+  } catch (error) {
+    root.classList.remove("story-ready");
+    root.classList.replace("js", "no-js");
+    console.error("Immersive story fallback enabled.", error);
+    return;
+  }
+
+  document.querySelectorAll("[data-year]").forEach((element) => {
+    element.textContent = String(new Date().getFullYear());
+  });
+
+  for (const setup of [setupCourseSelection, setupPhoneMask, setupForm]) {
+    try {
+      setup();
+    } catch (error) {
+      console.error("Interface enhancement failed.", error);
+    }
+  }
+}
+
+boot();
+})();
