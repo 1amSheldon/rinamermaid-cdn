@@ -206,6 +206,10 @@ function setupStory() {
     }
 
     const activeItem = next && local >= 0.5 ? next : current;
+    if (activeItem.scene === bookingScene) {
+      bookingScene.style.setProperty("--scene-opacity", "1");
+      bookingScene.style.setProperty("--scene-shift", "0rem");
+    }
     scenes.forEach((scene) => {
       const active = scene === activeItem.scene;
       scene.classList.toggle("is-active", active);
