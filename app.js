@@ -61,6 +61,7 @@ function setupStory() {
   let storyTopY = 0;
   let storyRange = 1;
   let bookingTravel = 0;
+  let initialStoryHash = window.location.hash;
   const resyncTimers = new Set();
 
   surface?.setAttribute("aria-hidden", "true");
@@ -182,6 +183,28 @@ function setupStory() {
     bookingTravel = mobileViewport.matches && bookingPanel
       ? Math.max(0, bookingPanel.scrollHeight - bookingPanel.clientHeight + 48)
       : 0;
+  }
+
+  function alignInitialHashTarget() {
+    if (!initialStoryHash) return;
+
+    let targetId = initialStoryHash.slice(1);
+    initialStoryHash = "";
+    try {
+      targetId = decodeURIComponent(targetId);
+    } catch {
+      return;
+    }
+
+    const target = sceneAnchors.find((item) => item.scene.id === targetId);
+    if (!target) return;
+
+    const scrollMargin = Number.parseFloat(getComputedStyle(target.scene).scrollMarginTop) || 0;
+    const targetY = Math.max(0, storyTopY + target.anchor - scrollMargin);
+    const previousBehavior = document.documentElement.style.scrollBehavior;
+    document.documentElement.style.scrollBehavior = "auto";
+    window.scrollTo(0, targetY);
+    document.documentElement.style.scrollBehavior = previousBehavior;
   }
 
   function renderScenes(currentY) {
@@ -428,6 +451,7 @@ function setupStory() {
   window.addEventListener("popstate", scheduleRemeasure, { passive: true });
   document.fonts?.ready.then(scheduleRemeasure).catch(() => {});
   measure();
+  alignInitialHashTarget();
   render();
   scheduleRemeasure();
   return true;
