@@ -188,6 +188,16 @@ function setupStory() {
   function alignInitialHashTarget() {
     if (!initialStoryHash) return;
 
+    const navigation = performance.getEntriesByType?.("navigation")?.[0];
+    const legacyNavigation = performance.navigation;
+    const isDirectNavigation = navigation
+      ? navigation.type === "navigate"
+      : legacyNavigation?.type === 0;
+    if (!isDirectNavigation) {
+      initialStoryHash = "";
+      return;
+    }
+
     let targetId = initialStoryHash.slice(1);
     initialStoryHash = "";
     try {
@@ -200,11 +210,18 @@ function setupStory() {
     if (!target) return;
 
     const scrollMargin = Number.parseFloat(getComputedStyle(target.scene).scrollMarginTop) || 0;
-    const targetY = Math.max(0, storyTopY + target.anchor - scrollMargin);
+    const maximumY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const targetY = clamp(storyTopY + target.anchor - scrollMargin, 0, maximumY);
     const previousBehavior = document.documentElement.style.scrollBehavior;
     document.documentElement.style.scrollBehavior = "auto";
     window.scrollTo(0, targetY);
-    document.documentElement.style.scrollBehavior = previousBehavior;
+    window.requestAnimationFrame(() => {
+      window.scrollTo(0, targetY);
+      window.requestAnimationFrame(() => {
+        document.documentElement.style.scrollBehavior = previousBehavior;
+        remeasure();
+      });
+    });
   }
 
   function renderScenes(currentY) {
