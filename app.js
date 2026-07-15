@@ -8,9 +8,8 @@ const APP_BOOT_KEY = "__RINA_MERMAID_APP_BOOTED__";
 if (window[APP_BOOT_KEY]) return;
 window[APP_BOOT_KEY] = true;
 
-const coarsePointer = window.matchMedia("(pointer: coarse)");
+const finePointer = window.matchMedia("(any-pointer: fine) and (hover: hover)");
 const mobileViewport = window.matchMedia("(max-width: 48rem)");
-const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const story = document.querySelector("[data-story]");
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
 
@@ -39,11 +38,11 @@ function setupStory() {
   const bookingScene = story.querySelector("[data-booking]");
   const bookingPanel = bookingScene?.querySelector(".story-scene__inner");
   const backToTop = document.querySelector("[data-back-to-top]");
-  const useWaterEffect = !coarsePointer.matches && !reducedMotion.matches;
+  const useWaterEffect = finePointer.matches;
 
   let animationFrame = 0;
   let experienceVisible = true;
-  let motionEnabled = !reducedMotion.matches;
+  let motionEnabled = true;
   let filmReady = false;
   let filmVisibleReady = false;
   let filmRequested = false;
